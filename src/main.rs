@@ -1,4 +1,5 @@
 mod config;
+mod db;
 mod payload;
 mod render;
 mod tracker;
@@ -125,6 +126,15 @@ fn main() {
         None
     };
     let metrics = tracker::resolve_metrics(&payload, cache_dir.as_deref(), fallback_rates);
+    if cfg.storage.enabled
+        && let Some(db_path) = cfg.storage.resolved_db_path()
+        && let Err(err) = db::record_snapshot(&db_path, &payload, &metrics)
+    {
+        eprintln!(
+            "antigravity-status: failed to record SQLite snapshot at {}: {err}",
+            db_path.display()
+        );
+    }
     let terminal_width = payload
         .terminal_width
         .filter(|&w| w > 0)

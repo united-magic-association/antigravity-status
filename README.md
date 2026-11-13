@@ -12,6 +12,8 @@ A fast, configurable Rust status line renderer for Google Antigravity CLI (`agy`
 - **Session Estimated Cost**: Session spend in USD (`cost.total_usd`, optional `subagent_usd`, with configurable local per-1M token pricing fallback when `cost` is omitted).
 - **Model & Effort (`model_and_effort`)**: Active model name with inline reasoning effort (e.g., `Gemini 4 Hydrogen (High)`).
 - **Agent Mode (`mode`)**: Active `cycle_mode` (`Mode: auto`, `Mode: plan`, `Mode: accept-edits`, etc.), placed first in the list by default.
+- **5h & Weekly Quota Gauges (`quota_5h_gauge`, `quota_weekly_gauge`)**: Remaining quota gauges automatically switched between `gemini-*` and `3p-*` buckets based on the active model.
+- **SQLite History Persistence (`[storage]`)**: Records cross-session token deltas (`session`, `usage_event`) and quota window observations (`quota_window`) into `~/.local/share/antigravity-status/history.db` (WAL mode) for long-term quota equivalence analysis.
 - **Right Alignment & `config.toml` Toggles**: Right-aligned by default using `terminal_width` from `agy`; enable/disable any widget individually, customize labels, order, multi-line layout, formatting, and color thresholds with hot reload on every status refresh.
 
 ## Quick Start

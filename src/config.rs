@@ -9,6 +9,7 @@ use serde::Deserialize;
 pub struct Config {
     pub general: GeneralConfig,
     pub format: FormatConfig,
+    pub storage: StorageConfig,
     pub modules: ModulesConfig,
     pub pricing: PricingConfig,
 }
@@ -48,6 +49,8 @@ impl Default for GeneralConfig {
                 "session_output_tokens".to_string(),
                 "session_cost".to_string(),
                 "model_and_effort".to_string(),
+                "quota_5h_gauge".to_string(),
+                "quota_weekly_gauge".to_string(),
             ],
             lines: Vec::new(),
             hide_zero_cache_write: false,
@@ -74,6 +77,62 @@ impl Default for FormatConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct StorageConfig {
+    pub enabled: bool,
+    pub db_path: Option<String>,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            db_path: None,
+        }
+    }
+}
+
+impl StorageConfig {
+    /// Resolves the SQLite database path, expanding leading `~/` when configured.
+    pub fn resolved_db_path(&self) -> Option<PathBuf> {
+        if let Some(raw) = self.db_path.as_deref().filter(|s| !s.is_empty()) {
+            return Some(expand_tilde(raw));
+        }
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME")
+            && !xdg.is_empty()
+        {
+            return Some(
+                PathBuf::from(xdg)
+                    .join("antigravity-status")
+                    .join("history.db"),
+            );
+        }
+        if let Ok(home) = std::env::var("HOME")
+            && !home.is_empty()
+        {
+            return Some(
+                PathBuf::from(home)
+                    .join(".local")
+                    .join("share")
+                    .join("antigravity-status")
+                    .join("history.db"),
+            );
+        }
+        None
+    }
+}
+
+fn expand_tilde(raw: &str) -> PathBuf {
+    if let Some(rest) = raw.strip_prefix("~/")
+        && let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(raw)
+}
+
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub struct ModulesConfig {
@@ -85,6 +144,8 @@ pub struct ModulesConfig {
     pub session_cost: CostModuleConfig,
     pub model_and_effort: ModelAndEffortConfig,
     pub mode: ModeModuleConfig,
+    pub quota_5h_gauge: QuotaGaugeConfig<Quota5hDefault>,
+    pub quota_weekly_gauge: QuotaGaugeConfig<QuotaWeeklyDefault>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -149,6 +210,22 @@ impl DefaultLabel for OutputDefault {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Quota5hDefault;
+impl DefaultLabel for Quota5hDefault {
+    fn default_label() -> &'static str {
+        "5h"
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct QuotaWeeklyDefault;
+impl DefaultLabel for QuotaWeeklyDefault {
+    fn default_label() -> &'static str {
+        "Wk"
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TokenModuleConfig<L: DefaultLabel> {
@@ -163,6 +240,41 @@ impl<L: DefaultLabel> Default for TokenModuleConfig<L> {
         Self {
             enabled: true,
             label: L::default_label().to_string(),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct QuotaGaugeConfig<L: DefaultLabel> {
+    pub enabled: bool,
+    pub label: String,
+    pub width: usize,
+    pub decimals: usize,
+    /// Remaining percentage at or below which the gauge turns yellow.
+    pub warn_percent: f64,
+    /// Remaining percentage at or below which the gauge turns red.
+    pub critical_percent: f64,
+    pub filled_char: String,
+    pub empty_char: String,
+    pub hide_missing: bool,
+    #[serde(skip)]
+    _marker: std::marker::PhantomData<L>,
+}
+
+impl<L: DefaultLabel> Default for QuotaGaugeConfig<L> {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            label: L::default_label().to_string(),
+            width: 6,
+            decimals: 1,
+            warn_percent: 30.0,
+            critical_percent: 10.0,
+            filled_char: "█".to_string(),
+            empty_char: "░".to_string(),
+            hide_missing: true,
             _marker: std::marker::PhantomData,
         }
     }
@@ -362,16 +474,19 @@ mod tests {
     fn example_config_parses_cleanly() {
         let raw = include_str!("../config.example.toml");
         let cfg = parse_config_str(raw).expect("config.example.toml should parse");
+        assert!(cfg.storage.enabled);
         assert!(cfg.modules.context_gauge.enabled);
         assert!(cfg.modules.session_cost.enabled);
         assert!(cfg.modules.session_cost.estimate_when_missing);
         assert!(cfg.modules.model_and_effort.enabled);
         assert!(cfg.modules.model_and_effort.include_effort);
         assert!(cfg.modules.mode.enabled);
+        assert!(cfg.modules.quota_5h_gauge.enabled);
+        assert!(cfg.modules.quota_weekly_gauge.enabled);
         assert_eq!(cfg.modules.mode.label, "Mode:");
         assert_eq!(cfg.general.align, Alignment::Right);
         assert_eq!(cfg.general.order.first().map(String::as_str), Some("mode"));
-        assert_eq!(cfg.general.order.len(), 8);
+        assert_eq!(cfg.general.order.len(), 10);
     }
 
     #[test]
@@ -385,6 +500,9 @@ enabled = false
 
 [modules.model_and_effort]
 include_effort = false
+
+[modules.quota_weekly_gauge]
+enabled = false
 "#;
         let cfg = parse_config_str(raw).expect("partial TOML should parse");
         assert!(cfg.modules.context_gauge.enabled);
@@ -396,6 +514,8 @@ include_effort = false
         assert!(cfg.modules.model_and_effort.enabled);
         assert!(!cfg.modules.model_and_effort.include_effort);
         assert!(cfg.modules.mode.enabled);
+        assert!(cfg.modules.quota_5h_gauge.enabled);
+        assert!(!cfg.modules.quota_weekly_gauge.enabled);
         assert_eq!(cfg.modules.session_input_tokens.label, "In");
     }
 

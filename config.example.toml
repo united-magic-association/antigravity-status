@@ -20,11 +20,13 @@ order = [
   "session_output_tokens",
   "session_cost",
   "model_and_effort",
+  "quota_5h_gauge",
+  "quota_weekly_gauge",
 ]
 # Optional multi-line layout. If non-empty, overrides `general.order`.
 # lines = [
 #   ["mode", "context_gauge", "session_cost", "model_and_effort"],
-#   ["session_input_tokens", "session_cache_read_tokens", "session_cache_write_tokens", "session_output_tokens"],
+#   ["session_input_tokens", "session_cache_read_tokens", "session_cache_write_tokens", "session_output_tokens", "quota_5h_gauge", "quota_weekly_gauge"],
 # ]
 hide_zero_cache_write = false
 hide_missing_cost = false
@@ -33,6 +35,11 @@ hide_missing_cost = false
 compact_tokens = true
 cost_precision = 4
 color = true
+
+[storage]
+enabled = true
+# Optional SQLite path (defaults to $XDG_DATA_HOME/antigravity-status/history.db or ~/.local/share/antigravity-status/history.db)
+# db_path = "~/.local/share/antigravity-status/history.db"
 
 [modules.context_gauge]
 enabled = true
@@ -76,6 +83,28 @@ include_effort = true
 [modules.mode]
 enabled = true
 label = "Mode:"
+
+[modules.quota_5h_gauge]
+enabled = true
+label = "5h"
+width = 6
+decimals = 1
+warn_percent = 30.0
+critical_percent = 10.0
+filled_char = "█"
+empty_char = "░"
+hide_missing = true
+
+[modules.quota_weekly_gauge]
+enabled = true
+label = "Wk"
+width = 6
+decimals = 1
+warn_percent = 30.0
+critical_percent = 10.0
+filled_char = "█"
+empty_char = "░"
+hide_missing = true
 
 # Fallback per-1M token pricing in USD (used only when `agy` omits `cost`).
 [pricing.default]
