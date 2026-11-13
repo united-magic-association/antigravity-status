@@ -196,3 +196,74 @@ fn format_with_commas(n: u64) -> String {
     }
     out.chars().rev().collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::parse_config_str;
+
+    fn sample_metrics() -> SessionMetrics {
+        SessionMetrics {
+            used_percentage: Some(42.3),
+            context_window_size: 1_048_576,
+            input_tokens: 88_244,
+            cache_read_tokens: 20_857,
+            cache_write_tokens: 4_096,
+            output_tokens: 61_074,
+            cost_usd: Some(0.1428),
+            subagent_cost_usd: Some(0.021),
+        }
+    }
+
+    #[test]
+    fn renders_all_six_modules_without_color() {
+        let mut cfg = Config::default();
+        cfg.format.color = false;
+        let out = render_status(&sample_metrics(), &cfg);
+        assert_eq!(
+            out,
+            "Ctx [████░░░░░░] 42.3% │ In 88.2k │ CacheR 20.9k │ CacheW 4.1k │ Out 61.1k │ Cost $0.1428"
+        );
+    }
+
+    #[test]
+    fn hides_disabled_modules_and_supports_multiline() {
+        let raw = r#"
+[general]
+lines = [
+  ["context_gauge", "session_cost"],
+  ["session_input_tokens", "session_cache_read_tokens", "session_cache_write_tokens", "session_output_tokens"],
+]
+hide_zero_cache_write = true
+
+[format]
+color = false
+compact_tokens = false
+
+[modules.session_cache_read_tokens]
+enabled = false
+"#;
+        let cfg = parse_config_str(raw).unwrap();
+        let mut metrics = sample_metrics();
+        metrics.cache_write_tokens = 0;
+
+        let out = render_status(&metrics, &cfg);
+        assert_eq!(
+            out,
+            "Ctx [████░░░░░░] 42.3% │ Cost $0.1428\nIn 88,244 │ Out 61,074"
+        );
+    }
+
+    #[test]
+    fn handles_missing_initial_metrics_gracefully() {
+        let mut cfg = Config::default();
+        cfg.format.color = false;
+        cfg.general.hide_missing_cost = true;
+
+        let out = render_status(&SessionMetrics::default(), &cfg);
+        assert_eq!(
+            out,
+            "Ctx [░░░░░░░░░░] --% │ In 0 │ CacheR 0 │ CacheW 0 │ Out 0"
+        );
+    }
+}

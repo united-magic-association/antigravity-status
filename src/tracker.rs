@@ -202,3 +202,104 @@ fn sanitize_session_id(id: &str) -> String {
         clean
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        std::env::temp_dir().join(format!("agy-status-test-{tag}-{nanos}"))
+    }
+
+    #[test]
+    fn deduplicates_repeated_ticks_and_accumulates_new_turns() {
+        let dir = temp_test_dir("dedup");
+        let payload_turn_1: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-1",
+              "context_window": {
+                "total_input_tokens": 1000,
+                "total_output_tokens": 200,
+                "used_percentage": 10.0,
+                "current_usage": {
+                  "input_tokens": 1000,
+                  "output_tokens": 200,
+                  "cache_read_input_tokens": 500,
+                  "cache_creation_input_tokens": 100
+                }
+              },
+              "cost": { "total_usd": 0.0123, "estimated": true }
+            }"#,
+        )
+        .unwrap();
+
+        let m1 = resolve_metrics(&payload_turn_1, Some(&dir));
+        assert_eq!(m1.cache_read_tokens, 500);
+        assert_eq!(m1.cache_write_tokens, 100);
+        assert_eq!(m1.cost_usd, Some(0.0123));
+
+        // Repeated 300ms tick with identical payload must not double-count.
+        let m1_repeat = resolve_metrics(&payload_turn_1, Some(&dir));
+        assert_eq!(m1_repeat.cache_read_tokens, 500);
+        assert_eq!(m1_repeat.cache_write_tokens, 100);
+
+        // Turn 2 advances cumulative totals and current_usage.
+        let payload_turn_2: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-1",
+              "context_window": {
+                "total_input_tokens": 2200,
+                "total_output_tokens": 450,
+                "used_percentage": 15.0,
+                "current_usage": {
+                  "input_tokens": 1200,
+                  "output_tokens": 250,
+                  "cache_read_input_tokens": 800,
+                  "cache_creation_input_tokens": 50
+                }
+              },
+              "cost": { "estimated": 0.0456 }
+            }"#,
+        )
+        .unwrap();
+
+        let m2 = resolve_metrics(&payload_turn_2, Some(&dir));
+        assert_eq!(m2.input_tokens, 2200);
+        assert_eq!(m2.output_tokens, 450);
+        assert_eq!(m2.cache_read_tokens, 1300);
+        assert_eq!(m2.cache_write_tokens, 150);
+        assert_eq!(m2.cost_usd, Some(0.0456));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn aggregates_transcript_cache_read_tokens() {
+        let dir = temp_test_dir("transcript");
+        fs::create_dir_all(&dir).unwrap();
+        let transcript = dir.join("transcript.jsonl");
+        fs::write(
+            &transcript,
+            concat!(
+                "{\"type\":\"USER_INPUT\"}\n",
+                "{\"type\":\"PLANNER_RESPONSE\",\"input_tokens\":100,\"cache_read_tokens\":1200,\"output_tokens\":50}\n",
+                "{\"type\":\"PLANNER_RESPONSE\",\"input_tokens\":150,\"cache_read_tokens\":2400,\"output_tokens\":80}\n"
+            ),
+        )
+        .unwrap();
+
+        let payload = StatusPayload {
+            transcript_path: Some(transcript.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+
+        let m = resolve_metrics(&payload, Some(&dir));
+        assert_eq!(m.cache_read_tokens, 3600);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

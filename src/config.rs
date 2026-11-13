@@ -248,3 +248,36 @@ fn parse_config_file(path: &Path) -> Option<Config> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn example_config_parses_cleanly() {
+        let raw = include_str!("../config.example.toml");
+        let cfg = parse_config_str(raw).expect("config.example.toml should parse");
+        assert!(cfg.modules.context_gauge.enabled);
+        assert!(cfg.modules.session_cost.enabled);
+        assert_eq!(cfg.general.order.len(), 6);
+    }
+
+    #[test]
+    fn partial_config_toggles_one_module_and_preserves_defaults() {
+        let raw = r#"
+[modules.session_cache_write_tokens]
+enabled = false
+
+[modules.session_cost]
+enabled = false
+"#;
+        let cfg = parse_config_str(raw).expect("partial TOML should parse");
+        assert!(cfg.modules.context_gauge.enabled);
+        assert!(cfg.modules.session_input_tokens.enabled);
+        assert!(cfg.modules.session_cache_read_tokens.enabled);
+        assert!(!cfg.modules.session_cache_write_tokens.enabled);
+        assert!(cfg.modules.session_output_tokens.enabled);
+        assert!(!cfg.modules.session_cost.enabled);
+        assert_eq!(cfg.modules.session_input_tokens.label, "In");
+    }
+}
