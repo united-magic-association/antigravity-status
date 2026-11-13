@@ -1,5 +1,5 @@
-use crate::config::{Alignment, Config};
-use crate::payload::StatusPayload;
+use crate::config::{Alignment, Config, DefaultLabel, QuotaGaugeConfig};
+use crate::payload::{QuotaWindowKind, StatusPayload};
 use crate::tracker::SessionMetrics;
 
 const RESET: &str = "\x1b[0m";
@@ -197,8 +197,83 @@ fn render_module(
             };
             Some(format_kv(&cfg.label, mode, tone, color))
         }
+        "quota_5h_gauge" => {
+            let cfg = &config.modules.quota_5h_gauge;
+            if !cfg.enabled {
+                return None;
+            }
+            let frac = payload
+                .active_quota_bucket(QuotaWindowKind::FiveHour)
+                .and_then(|b| b.remaining_fraction);
+            render_quota_gauge(frac, cfg, color)
+        }
+        "quota_weekly_gauge" => {
+            let cfg = &config.modules.quota_weekly_gauge;
+            if !cfg.enabled {
+                return None;
+            }
+            let frac = payload
+                .active_quota_bucket(QuotaWindowKind::Weekly)
+                .and_then(|b| b.remaining_fraction);
+            render_quota_gauge(frac, cfg, color)
+        }
         _ => None,
     }
+}
+
+fn render_quota_gauge<L: DefaultLabel>(
+    remaining_fraction: Option<f64>,
+    cfg: &QuotaGaugeConfig<L>,
+    color: bool,
+) -> Option<String> {
+    let width = cfg.width.max(1);
+    let filled_char = if cfg.filled_char.is_empty() {
+        "█"
+    } else {
+        &cfg.filled_char
+    };
+    let empty_char = if cfg.empty_char.is_empty() {
+        "░"
+    } else {
+        &cfg.empty_char
+    };
+
+    let (bar, pct_text, tone) = match remaining_fraction {
+        Some(frac) => {
+            let pct = (frac * 100.0).clamp(0.0, 100.0);
+            let filled = ((pct / 100.0) * width as f64).round() as usize;
+            let filled = filled.min(width);
+            let empty = width - filled;
+            let bar = format!(
+                "{}{}",
+                filled_char.repeat(filled),
+                empty_char.repeat(empty)
+            );
+            let tone = if pct <= cfg.critical_percent {
+                RED
+            } else if pct <= cfg.warn_percent {
+                YELLOW
+            } else {
+                GREEN
+            };
+            let prec = cfg.decimals;
+            (bar, format!("{pct:.prec$}%"), tone)
+        }
+        None if cfg.hide_missing => return None,
+        None => (empty_char.repeat(width), "--%".to_string(), DIM),
+    };
+
+    let prefix = if cfg.label.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", paint(&cfg.label, DIM, color))
+    };
+
+    Some(format!(
+        "{prefix}[{}] {}",
+        paint(&bar, tone, color),
+        paint(&pct_text, tone, color)
+    ))
 }
 
 fn strip_trailing_effort<'a>(name: &'a str, effort: &str) -> &'a str {
@@ -398,11 +473,17 @@ mod tests {
         serde_json::from_str(
             r#"{
               "cycle_mode": "auto",
-              "terminal_width": 120,
+              "terminal_width": 170,
               "model": {
                 "id": "Gemini 4 Hydrogen (High)",
                 "display_name": "Gemini 4 Hydrogen (High)",
                 "effort": "high"
+              },
+              "quota": {
+                "gemini-5h": { "remaining_fraction": 0.933 },
+                "gemini-weekly": { "remaining_fraction": 0.922 },
+                "3p-5h": { "remaining_fraction": 1.0 },
+                "3p-weekly": { "remaining_fraction": 0.539 }
               }
             }"#,
         )
@@ -410,14 +491,35 @@ mod tests {
     }
 
     #[test]
-    fn renders_mode_at_left_of_right_aligned_list() {
+    fn renders_gemini_quota_gauges_to_the_right_of_model_and_effort() {
         let mut cfg = Config::default();
         cfg.format.color = false;
-        let out = render_status(&sample_metrics(), &sample_payload(), &cfg, Some(140));
-        let expected_content = "Mode: auto │ Ctx [████░░░░░░] 42.3% │ In 88.2k │ CacheR 20.9k │ CacheW 4.1k │ Out 61.1k │ Cost $0.1428 │ Gemini 4 Hydrogen (High)";
-        assert!(out.starts_with("  "));
+        let out = render_status(&sample_metrics(), &sample_payload(), &cfg, Some(170));
+        let expected_content = "Mode: auto │ Ctx [████░░░░░░] 42.3% │ In 88.2k │ CacheR 20.9k │ CacheW 4.1k │ Out 61.1k │ Cost $0.1428 │ Gemini 4 Hydrogen (High) │ 5h [██████] 93.3% │ Wk [██████] 92.2%";
+        assert!(out.starts_with(" "));
         assert!(out.ends_with(expected_content));
-        assert_eq!(visible_width(&out), 140);
+        assert_eq!(visible_width(&out), 170);
+    }
+
+    #[test]
+    fn switches_to_3p_quota_buckets_for_non_gemini_model() {
+        let mut cfg = Config::default();
+        cfg.format.color = false;
+        cfg.general.align = Alignment::Left;
+        cfg.general.order = vec![
+            "model_and_effort".to_string(),
+            "quota_5h_gauge".to_string(),
+            "quota_weekly_gauge".to_string(),
+        ];
+        let mut payload = sample_payload();
+        payload.model.as_mut().unwrap().id = Some("Claude Sonnet 4.6".to_string());
+        payload.model.as_mut().unwrap().display_name = Some("Claude Sonnet 4.6".to_string());
+
+        let out = render_status(&sample_metrics(), &payload, &cfg, None);
+        assert_eq!(
+            out,
+            "Claude Sonnet 4.6 (High) │ 5h [██████] 100.0% │ Wk [███░░░] 53.9%"
+        );
     }
 
     #[test]
@@ -445,8 +547,8 @@ mod tests {
     fn visible_width_ignores_ansi_escapes() {
         let mut cfg = Config::default();
         cfg.format.color = true;
-        let out = render_status(&sample_metrics(), &sample_payload(), &cfg, Some(145));
-        assert_eq!(visible_width(&out), 145);
+        let out = render_status(&sample_metrics(), &sample_payload(), &cfg, Some(180));
+        assert_eq!(visible_width(&out), 180);
     }
 
     #[test]
@@ -485,8 +587,7 @@ enabled = false
         cfg.general.align = Alignment::Left;
         cfg.modules.model_and_effort.include_effort = false;
         let out = render_status(&sample_metrics(), &sample_payload(), &cfg, None);
-        assert!(out.starts_with("Mode: auto │ "));
-        assert!(out.ends_with("Gemini 4 Hydrogen"));
+        assert!(out.contains("│ Gemini 4 Hydrogen │"));
     }
 
     #[test]

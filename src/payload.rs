@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 /// Top-level JSON payload piped to a custom `statusLine` command via `stdin`.
@@ -20,6 +22,28 @@ pub struct StatusPayload {
     pub workspace: Option<WorkspaceInfo>,
     pub context_window: Option<ContextWindow>,
     pub cost: Option<CostInfo>,
+    pub quota: BTreeMap<String, QuotaBucket>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaGroup {
+    Gemini,
+    ThirdParty,
+}
+
+impl QuotaGroup {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Gemini => "gemini",
+            Self::ThirdParty => "3p",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaWindowKind {
+    FiveHour,
+    Weekly,
 }
 
 impl StatusPayload {
@@ -31,7 +55,7 @@ impl StatusPayload {
             .or_else(|| self.conversation_id.as_deref().filter(|s| !s.is_empty()))
     }
 
-    /// Returns the active model identifier or display name for pricing lookup.
+    /// Returns the active model identifier or display name for pricing and quota group lookup.
     pub fn effective_model_name(&self) -> Option<&str> {
         self.model.as_ref().and_then(|m| {
             m.id.as_deref()
@@ -39,6 +63,40 @@ impl StatusPayload {
                 .or_else(|| m.display_name.as_deref().filter(|s| !s.is_empty()))
         })
     }
+
+    /// Selects `gemini` or `3p` quota bucket family based on the active model.
+    pub fn active_quota_group(&self) -> QuotaGroup {
+        if let Some(name) = self.effective_model_name() {
+            if name.to_ascii_lowercase().contains("gemini") {
+                return QuotaGroup::Gemini;
+            }
+            return QuotaGroup::ThirdParty;
+        }
+        if self.quota.contains_key("gemini-5h") || self.quota.contains_key("gemini-weekly") {
+            QuotaGroup::Gemini
+        } else {
+            QuotaGroup::ThirdParty
+        }
+    }
+
+    /// Returns the active 5h or weekly quota bucket matching the current model family.
+    pub fn active_quota_bucket(&self, kind: QuotaWindowKind) -> Option<&QuotaBucket> {
+        let key = match (self.active_quota_group(), kind) {
+            (QuotaGroup::Gemini, QuotaWindowKind::FiveHour) => "gemini-5h",
+            (QuotaGroup::Gemini, QuotaWindowKind::Weekly) => "gemini-weekly",
+            (QuotaGroup::ThirdParty, QuotaWindowKind::FiveHour) => "3p-5h",
+            (QuotaGroup::ThirdParty, QuotaWindowKind::Weekly) => "3p-weekly",
+        };
+        self.quota.get(key)
+    }
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default)]
+pub struct QuotaBucket {
+    pub remaining_fraction: Option<f64>,
+    pub reset_time: Option<String>,
+    pub reset_in_seconds: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
