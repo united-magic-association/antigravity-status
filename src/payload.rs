@@ -74,7 +74,7 @@ pub struct CostInfo {
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(untagged)]
 pub enum EstimatedField {
-    Bool(bool),
+    Bool(#[allow(dead_code)] bool),
     Amount(f64),
 }
 
