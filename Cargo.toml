@@ -2,8 +2,14 @@
 name = "antigravity-status"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Configurable status line renderer for Google Antigravity CLI (agy)"
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/united-magic-association/antigravity-status"
+homepage = "https://github.com/united-magic-association/antigravity-status"
+keywords = ["antigravity", "agy", "statusline", "cli", "tui"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
