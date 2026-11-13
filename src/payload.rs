@@ -154,7 +154,7 @@ pub enum EstimatedField {
 impl CostInfo {
     /// Returns the estimated total session spend in USD when available.
     pub fn effective_total_usd(&self) -> Option<f64> {
-        self.total_usd.or_else(|| match self.estimated {
+        self.total_usd.or(match self.estimated {
             Some(EstimatedField::Amount(v)) => Some(v),
             _ => None,
         })

@@ -70,7 +70,11 @@ pub fn default_cache_dir() -> Option<PathBuf> {
     if let Ok(home) = std::env::var("HOME")
         && !home.is_empty()
     {
-        return Some(PathBuf::from(home).join(".cache").join("antigravity-status"));
+        return Some(
+            PathBuf::from(home)
+                .join(".cache")
+                .join("antigravity-status"),
+        );
     }
     Some(std::env::temp_dir().join("antigravity-status"))
 }
@@ -183,7 +187,8 @@ fn resolve_transcript_path(raw: &str) -> Option<PathBuf> {
     }
 
     if raw.contains("/.gemini/antigravity/") {
-        let cli_path = PathBuf::from(raw.replace("/.gemini/antigravity/", "/.gemini/antigravity-cli/"));
+        let cli_path =
+            PathBuf::from(raw.replace("/.gemini/antigravity/", "/.gemini/antigravity-cli/"));
         if cli_path.is_file() {
             return Some(cli_path);
         }
@@ -230,7 +235,9 @@ fn sum_transcript_tokens(path: &Path) -> Option<TranscriptTotals> {
                 .or(step.cache_write_tokens)
                 .unwrap_or(0);
             totals.cache_write = totals.cache_write.saturating_add(write);
-            totals.output = totals.output.saturating_add(step.output_tokens.unwrap_or(0));
+            totals.output = totals
+                .output
+                .saturating_add(step.output_tokens.unwrap_or(0));
         }
     }
 
@@ -279,7 +286,9 @@ fn update_session_cache(
         if state.last_usage.is_none() || totals_advanced || usage_changed {
             state.sum_input = state.sum_input.saturating_add(curr.input_tokens);
             state.sum_output = state.sum_output.saturating_add(curr.output_tokens);
-            state.sum_cache_read = state.sum_cache_read.saturating_add(curr.cache_read_input_tokens);
+            state.sum_cache_read = state
+                .sum_cache_read
+                .saturating_add(curr.cache_read_input_tokens);
             state.sum_cache_write = state
                 .sum_cache_write
                 .saturating_add(curr.cache_creation_input_tokens);

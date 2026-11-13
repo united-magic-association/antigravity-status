@@ -452,7 +452,10 @@ fn parse_config_file(path: &Path) -> Option<Config> {
     let raw = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(err) => {
-            eprintln!("antigravity-status: failed to read {}: {err}", path.display());
+            eprintln!(
+                "antigravity-status: failed to read {}: {err}",
+                path.display()
+            );
             return None;
         }
     };
@@ -460,7 +463,10 @@ fn parse_config_file(path: &Path) -> Option<Config> {
     match parse_config_str(&raw) {
         Ok(cfg) => Some(cfg),
         Err(err) => {
-            eprintln!("antigravity-status: invalid TOML in {}: {err}", path.display());
+            eprintln!(
+                "antigravity-status: invalid TOML in {}: {err}",
+                path.display()
+            );
             None
         }
     }
@@ -533,11 +539,15 @@ input_per_million = 3.5
 "#;
         let cfg = parse_config_str(raw).unwrap();
         assert_eq!(
-            cfg.pricing.rates_for_model(Some("Gemini 4 Hydrogen (High)")).input_per_million,
+            cfg.pricing
+                .rates_for_model(Some("Gemini 4 Hydrogen (High)"))
+                .input_per_million,
             3.5
         );
         assert_eq!(
-            cfg.pricing.rates_for_model(Some("Unknown Model")).input_per_million,
+            cfg.pricing
+                .rates_for_model(Some("Unknown Model"))
+                .input_per_million,
             1.0
         );
     }
