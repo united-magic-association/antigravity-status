@@ -134,7 +134,17 @@ fn record_session_usage(
                 delta_input_token, delta_cache_read_token, delta_cache_write_token,
                 delta_output_token, delta_reported_cost_usd
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![now, session_id, bucket_group, model_id, d_in, d_cr, d_cw, d_out, d_cost],
+            params![
+                now,
+                session_id,
+                bucket_group,
+                model_id,
+                d_in,
+                d_cr,
+                d_cw,
+                d_out,
+                d_cost
+            ],
         )?;
     }
 

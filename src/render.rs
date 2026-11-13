@@ -111,7 +111,9 @@ fn render_module(
         }
         "session_cache_write_tokens" => {
             let cfg = &config.modules.session_cache_write_tokens;
-            if !cfg.enabled || (config.general.hide_zero_cache_write && metrics.cache_write_tokens == 0) {
+            if !cfg.enabled
+                || (config.general.hide_zero_cache_write && metrics.cache_write_tokens == 0)
+            {
                 return None;
             }
             let val = format_tokens(metrics.cache_write_tokens, config.format.compact_tokens);
@@ -156,15 +158,12 @@ fn render_module(
             if !cfg.enabled {
                 return None;
             }
-            let raw_name = payload
-                .model
-                .as_ref()
-                .and_then(|m| {
-                    m.display_name
-                        .as_deref()
-                        .filter(|s| !s.is_empty())
-                        .or(m.id.as_deref().filter(|s| !s.is_empty()))
-                })?;
+            let raw_name = payload.model.as_ref().and_then(|m| {
+                m.display_name
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .or(m.id.as_deref().filter(|s| !s.is_empty()))
+            })?;
 
             let effort = payload
                 .model
@@ -185,10 +184,7 @@ fn render_module(
             if !cfg.enabled {
                 return None;
             }
-            let mode = payload
-                .cycle_mode
-                .as_deref()
-                .filter(|s| !s.is_empty())?;
+            let mode = payload.cycle_mode.as_deref().filter(|s| !s.is_empty())?;
             let tone = match mode.to_ascii_lowercase().as_str() {
                 "auto" => GREEN,
                 "plan" => YELLOW,
@@ -244,11 +240,7 @@ fn render_quota_gauge<L: DefaultLabel>(
             let filled = ((pct / 100.0) * width as f64).round() as usize;
             let filled = filled.min(width);
             let empty = width - filled;
-            let bar = format!(
-                "{}{}",
-                filled_char.repeat(filled),
-                empty_char.repeat(empty)
-            );
+            let bar = format!("{}{}", filled_char.repeat(filled), empty_char.repeat(empty));
             let tone = if pct <= cfg.critical_percent {
                 RED
             } else if pct <= cfg.warn_percent {
@@ -336,11 +328,7 @@ fn render_context_gauge(
             let filled = ((clamped / 100.0) * width as f64).round() as usize;
             let filled = filled.min(width);
             let empty = width - filled;
-            let bar = format!(
-                "{}{}",
-                filled_char.repeat(filled),
-                empty_char.repeat(empty)
-            );
+            let bar = format!("{}{}", filled_char.repeat(filled), empty_char.repeat(empty));
             let tone = if clamped >= cfg.critical_percent {
                 RED
             } else if clamped >= cfg.warn_percent {
@@ -359,7 +347,11 @@ fn render_context_gauge(
         format!("{} ", paint(&cfg.label, DIM, color))
     };
 
-    format!("{prefix}[{}] {}", paint(&bar, tone, color), paint(&pct_text, tone, color))
+    format!(
+        "{prefix}[{}] {}",
+        paint(&bar, tone, color),
+        paint(&pct_text, tone, color)
+    )
 }
 
 fn format_kv(label: &str, value: &str, value_color: &str, color: bool) -> String {
