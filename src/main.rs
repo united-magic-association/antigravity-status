@@ -119,7 +119,12 @@ fn main() {
 
     let cfg = config::load_config(args.config_path.as_deref(), payload.cwd.as_deref());
     let cache_dir = tracker::default_cache_dir();
-    let metrics = tracker::resolve_metrics(&payload, cache_dir.as_deref());
+    let fallback_rates = if cfg.modules.session_cost.estimate_when_missing {
+        Some(cfg.pricing.rates_for_model(payload.effective_model_name()))
+    } else {
+        None
+    };
+    let metrics = tracker::resolve_metrics(&payload, cache_dir.as_deref(), fallback_rates);
     let output = render::render_status(&metrics, &cfg);
 
     if !output.is_empty() {

@@ -58,3 +58,20 @@ label = "Out"
 enabled = true
 label = "Cost"
 show_subagent = false
+# Estimate USD cost locally from token counts when `agy` omits `cost` (e.g. Google AI Ultra).
+estimate_when_missing = true
+estimated_prefix = "~"
+
+# Fallback per-1M token pricing in USD (used only when `agy` omits `cost`).
+[pricing.default]
+input_per_million = 2.00
+cache_read_per_million = 0.20
+cache_write_per_million = 2.50
+output_per_million = 12.00
+
+# Optional per-model substring overrides (longest match wins):
+# [pricing.models."flash"]
+# input_per_million = 0.30
+# cache_read_per_million = 0.03
+# cache_write_per_million = 0.375
+# output_per_million = 2.50

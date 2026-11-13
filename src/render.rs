@@ -85,7 +85,12 @@ fn render_module(id: &str, metrics: &SessionMetrics, config: &Config) -> Option<
             match metrics.cost_usd {
                 Some(total) => {
                     let prec = config.format.cost_precision;
-                    let mut val = format!("${total:.prec$}");
+                    let prefix = if metrics.cost_is_local_estimate {
+                        cfg.estimated_prefix.as_str()
+                    } else {
+                        ""
+                    };
+                    let mut val = format!("{prefix}${total:.prec$}");
                     if cfg.show_subagent
                         && let Some(sub) = metrics.subagent_cost_usd
                         && sub > 0.0
@@ -212,6 +217,7 @@ mod tests {
             output_tokens: 61_074,
             cost_usd: Some(0.1428),
             subagent_cost_usd: Some(0.021),
+            cost_is_local_estimate: false,
         }
     }
 

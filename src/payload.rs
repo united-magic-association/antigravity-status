@@ -11,6 +11,11 @@ pub struct StatusPayload {
     pub transcript_path: Option<String>,
     pub version: Option<String>,
     pub plan_tier: Option<String>,
+    pub product: Option<String>,
+    pub agent_state: Option<String>,
+    pub cycle_mode: Option<String>,
+    pub terminal_width: Option<u16>,
+    pub exceeds_200k_tokens: Option<bool>,
     pub model: Option<ModelInfo>,
     pub workspace: Option<WorkspaceInfo>,
     pub context_window: Option<ContextWindow>,
@@ -24,6 +29,15 @@ impl StatusPayload {
             .as_deref()
             .filter(|s| !s.is_empty())
             .or_else(|| self.conversation_id.as_deref().filter(|s| !s.is_empty()))
+    }
+
+    /// Returns the active model identifier or display name for pricing lookup.
+    pub fn effective_model_name(&self) -> Option<&str> {
+        self.model.as_ref().and_then(|m| {
+            m.id.as_deref()
+                .filter(|s| !s.is_empty())
+                .or_else(|| m.display_name.as_deref().filter(|s| !s.is_empty()))
+        })
     }
 }
 
@@ -45,6 +59,7 @@ pub struct WorkspaceInfo {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct ContextWindow {
+    /// Current context window token count in `agy` (matches `used_percentage`).
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
     pub context_window_size: u64,

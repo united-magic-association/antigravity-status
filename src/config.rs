@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,6 +10,7 @@ pub struct Config {
     pub general: GeneralConfig,
     pub format: FormatConfig,
     pub modules: ModulesConfig,
+    pub pricing: PricingConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -156,6 +158,9 @@ pub struct CostModuleConfig {
     pub enabled: bool,
     pub label: String,
     pub show_subagent: bool,
+    /// Estimate USD cost locally from token counts when `agy` omits `cost` (e.g. subscription plans).
+    pub estimate_when_missing: bool,
+    pub estimated_prefix: String,
 }
 
 impl Default for CostModuleConfig {
@@ -164,6 +169,55 @@ impl Default for CostModuleConfig {
             enabled: true,
             label: "Cost".to_string(),
             show_subagent: false,
+            estimate_when_missing: true,
+            estimated_prefix: "~".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default)]
+pub struct PricingConfig {
+    pub default: TokenRates,
+    pub models: BTreeMap<String, TokenRates>,
+}
+
+impl PricingConfig {
+    /// Finds the best matching per-1M token rate table for the active model.
+    pub fn rates_for_model(&self, model_name: Option<&str>) -> &TokenRates {
+        if let Some(name) = model_name {
+            let lower = name.to_ascii_lowercase();
+            // Prefer the longest matching pattern for deterministic specificity.
+            let best = self
+                .models
+                .iter()
+                .filter(|(pattern, _)| lower.contains(&pattern.to_ascii_lowercase()))
+                .max_by_key(|(pattern, _)| pattern.len());
+            if let Some((_, rates)) = best {
+                return rates;
+            }
+        }
+        &self.default
+    }
+}
+
+/// USD per 1M tokens.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default)]
+pub struct TokenRates {
+    pub input_per_million: f64,
+    pub cache_read_per_million: f64,
+    pub cache_write_per_million: f64,
+    pub output_per_million: f64,
+}
+
+impl Default for TokenRates {
+    fn default() -> Self {
+        Self {
+            input_per_million: 2.00,
+            cache_read_per_million: 0.20,
+            cache_write_per_million: 2.50,
+            output_per_million: 12.00,
         }
     }
 }
@@ -259,6 +313,7 @@ mod tests {
         let cfg = parse_config_str(raw).expect("config.example.toml should parse");
         assert!(cfg.modules.context_gauge.enabled);
         assert!(cfg.modules.session_cost.enabled);
+        assert!(cfg.modules.session_cost.estimate_when_missing);
         assert_eq!(cfg.general.order.len(), 6);
     }
 
@@ -279,5 +334,28 @@ enabled = false
         assert!(cfg.modules.session_output_tokens.enabled);
         assert!(!cfg.modules.session_cost.enabled);
         assert_eq!(cfg.modules.session_input_tokens.label, "In");
+    }
+
+    #[test]
+    fn pricing_matches_longest_model_substring() {
+        let raw = r#"
+[pricing.default]
+input_per_million = 1.0
+
+[pricing.models."gemini 4"]
+input_per_million = 2.5
+
+[pricing.models."gemini 4 hydrogen"]
+input_per_million = 3.5
+"#;
+        let cfg = parse_config_str(raw).unwrap();
+        assert_eq!(
+            cfg.pricing.rates_for_model(Some("Gemini 4 Hydrogen (High)")).input_per_million,
+            3.5
+        );
+        assert_eq!(
+            cfg.pricing.rates_for_model(Some("Unknown Model")).input_per_million,
+            1.0
+        );
     }
 }
