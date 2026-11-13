@@ -125,7 +125,17 @@ fn main() {
         None
     };
     let metrics = tracker::resolve_metrics(&payload, cache_dir.as_deref(), fallback_rates);
-    let output = render::render_status(&metrics, &cfg);
+    let terminal_width = payload
+        .terminal_width
+        .filter(|&w| w > 0)
+        .map(usize::from)
+        .or_else(|| {
+            std::env::var("COLUMNS")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .filter(|&w| w > 0)
+        });
+    let output = render::render_status(&metrics, &payload, &cfg, terminal_width);
 
     if !output.is_empty() {
         println!("{output}");

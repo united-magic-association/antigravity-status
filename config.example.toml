@@ -7,18 +7,23 @@
 
 [general]
 separator = " │ "
+# Alignment: "right" (pads using `terminal_width` from agy) or "left"
+align = "right"
+right_margin = 0
 # Controls rendered order. Remove or disable items individually under [modules.*].
 order = [
+  "mode",
   "context_gauge",
   "session_input_tokens",
   "session_cache_read_tokens",
   "session_cache_write_tokens",
   "session_output_tokens",
   "session_cost",
+  "model_and_effort",
 ]
 # Optional multi-line layout. If non-empty, overrides `general.order`.
 # lines = [
-#   ["context_gauge", "session_cost"],
+#   ["mode", "context_gauge", "session_cost", "model_and_effort"],
 #   ["session_input_tokens", "session_cache_read_tokens", "session_cache_write_tokens", "session_output_tokens"],
 # ]
 hide_zero_cache_write = false
@@ -61,6 +66,16 @@ show_subagent = false
 # Estimate USD cost locally from token counts when `agy` omits `cost` (e.g. Google AI Ultra).
 estimate_when_missing = true
 estimated_prefix = "~"
+
+[modules.model_and_effort]
+enabled = true
+label = ""
+# Show effort inline as "Gemini 4 Hydrogen (High)". Set false to hide "(High)".
+include_effort = true
+
+[modules.mode]
+enabled = true
+label = "Mode:"
 
 # Fallback per-1M token pricing in USD (used only when `agy` omits `cost`).
 [pricing.default]

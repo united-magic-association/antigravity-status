@@ -9,8 +9,10 @@ A fast, configurable Rust status line renderer for Google Antigravity CLI (`agy`
 - **Session Cache Read Tokens**: Session-level cache read tokens (aggregated from `transcript_path` when available, with deduplicated `current_usage` tracking fallback).
 - **Session Cache Write Tokens**: Session-level cache creation tokens (deduplicated per-session from `current_usage.cache_creation_input_tokens`).
 - **Session Output Tokens**: Cumulative output tokens (`context_window.total_output_tokens`).
-- **Session Estimated Cost**: Session spend in USD (`cost.total_usd`, optional `subagent_usd`).
-- **Per-Item `config.toml` Toggles**: Enable/disable any widget individually, customize labels, order, multi-line layout, formatting, and color thresholds with hot reload on every status refresh.
+- **Session Estimated Cost**: Session spend in USD (`cost.total_usd`, optional `subagent_usd`, with configurable local per-1M token pricing fallback when `cost` is omitted).
+- **Model & Effort (`model_and_effort`)**: Active model name with inline reasoning effort (e.g., `Gemini 4 Hydrogen (High)`).
+- **Agent Mode (`mode`)**: Active `cycle_mode` (`Mode: auto`, `Mode: plan`, `Mode: accept-edits`, etc.), placed first in the list by default.
+- **Right Alignment & `config.toml` Toggles**: Right-aligned by default using `terminal_width` from `agy`; enable/disable any widget individually, customize labels, order, multi-line layout, formatting, and color thresholds with hot reload on every status refresh.
 
 ## Quick Start
 

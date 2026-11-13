@@ -13,10 +13,20 @@ pub struct Config {
     pub pricing: PricingConfig,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Alignment {
+    Left,
+    #[default]
+    Right,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct GeneralConfig {
     pub separator: String,
+    pub align: Alignment,
+    pub right_margin: usize,
     pub order: Vec<String>,
     pub lines: Vec<Vec<String>>,
     pub hide_zero_cache_write: bool,
@@ -27,13 +37,17 @@ impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             separator: " │ ".to_string(),
+            align: Alignment::Right,
+            right_margin: 0,
             order: vec![
+                "mode".to_string(),
                 "context_gauge".to_string(),
                 "session_input_tokens".to_string(),
                 "session_cache_read_tokens".to_string(),
                 "session_cache_write_tokens".to_string(),
                 "session_output_tokens".to_string(),
                 "session_cost".to_string(),
+                "model_and_effort".to_string(),
             ],
             lines: Vec::new(),
             hide_zero_cache_write: false,
@@ -69,6 +83,8 @@ pub struct ModulesConfig {
     pub session_cache_write_tokens: TokenModuleConfig<CacheWriteDefault>,
     pub session_output_tokens: TokenModuleConfig<OutputDefault>,
     pub session_cost: CostModuleConfig,
+    pub model_and_effort: ModelAndEffortConfig,
+    pub mode: ModeModuleConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -171,6 +187,41 @@ impl Default for CostModuleConfig {
             show_subagent: false,
             estimate_when_missing: true,
             estimated_prefix: "~".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ModelAndEffortConfig {
+    pub enabled: bool,
+    pub label: String,
+    /// Show effort inline as `Model (High)` when `effort` is reported.
+    pub include_effort: bool,
+}
+
+impl Default for ModelAndEffortConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            label: String::new(),
+            include_effort: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ModeModuleConfig {
+    pub enabled: bool,
+    pub label: String,
+}
+
+impl Default for ModeModuleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            label: "Mode:".to_string(),
         }
     }
 }
@@ -314,7 +365,13 @@ mod tests {
         assert!(cfg.modules.context_gauge.enabled);
         assert!(cfg.modules.session_cost.enabled);
         assert!(cfg.modules.session_cost.estimate_when_missing);
-        assert_eq!(cfg.general.order.len(), 6);
+        assert!(cfg.modules.model_and_effort.enabled);
+        assert!(cfg.modules.model_and_effort.include_effort);
+        assert!(cfg.modules.mode.enabled);
+        assert_eq!(cfg.modules.mode.label, "Mode:");
+        assert_eq!(cfg.general.align, Alignment::Right);
+        assert_eq!(cfg.general.order.first().map(String::as_str), Some("mode"));
+        assert_eq!(cfg.general.order.len(), 8);
     }
 
     #[test]
@@ -325,6 +382,9 @@ enabled = false
 
 [modules.session_cost]
 enabled = false
+
+[modules.model_and_effort]
+include_effort = false
 "#;
         let cfg = parse_config_str(raw).expect("partial TOML should parse");
         assert!(cfg.modules.context_gauge.enabled);
@@ -333,6 +393,9 @@ enabled = false
         assert!(!cfg.modules.session_cache_write_tokens.enabled);
         assert!(cfg.modules.session_output_tokens.enabled);
         assert!(!cfg.modules.session_cost.enabled);
+        assert!(cfg.modules.model_and_effort.enabled);
+        assert!(!cfg.modules.model_and_effort.include_effort);
+        assert!(cfg.modules.mode.enabled);
         assert_eq!(cfg.modules.session_input_tokens.label, "In");
     }
 
