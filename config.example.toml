@@ -59,7 +59,7 @@ enabled = true
 label = "CacheR"
 
 [modules.session_cache_write_tokens]
-enabled = true
+enabled = false
 label = "CacheW"
 
 [modules.session_output_tokens]
