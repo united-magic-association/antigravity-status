@@ -10,6 +10,7 @@ A fast, configurable Rust status line renderer for Google Antigravity CLI (`agy`
 - **Session Cache Read Tokens (`session_cache_read_tokens`)**: Session-level cache read tokens (aggregated from `transcript_path` when available, with deduplicated `current_usage` tracking fallback).
 - **Session Cache Write Tokens (`session_cache_write_tokens`)**: Session-level cache creation tokens (deduplicated per-session from `current_usage.cache_creation_input_tokens`).
 - **Session Output Tokens (`session_output_tokens`)**: Cumulative output tokens (aggregated from `transcript_path` and `context_window.total_output_tokens`).
+- **Session Estimated TPS (`session_estimated_tps`)**: Approximate session-wide output throughput (`~XX.X t/s`), accumulated locally from `agent_state` (`"working"`) durations and output token increments (hidden until a turn completes).
 - **Session Estimated Cost (`session_cost`)**: Session spend in USD (`cost.total_usd`, optional `subagent_usd`, with configurable local per-1M token pricing fallback when `cost` is omitted).
 - **Model & Effort (`model_and_effort`)**: Active model name with inline reasoning effort (e.g., `Gemini 4 Hydrogen (High)`).
 - **5h & Weekly Quota Gauges (`quota_5h_gauge`, `quota_weekly_gauge`)**: Remaining quota gauges automatically switched between `gemini-*` and `3p-*` buckets based on the active model.

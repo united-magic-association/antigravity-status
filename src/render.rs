@@ -127,6 +127,26 @@ fn render_module(
             let val = format_tokens(metrics.output_tokens, config.format.compact_tokens);
             Some(format_kv(&cfg.label, &val, CYAN, color))
         }
+        "session_estimated_tps" => {
+            let cfg = &config.modules.session_estimated_tps;
+            if !cfg.enabled {
+                return None;
+            }
+            match metrics.session_estimated_tps {
+                Some(tps) => {
+                    let prec = cfg.decimals;
+                    let unit = if cfg.unit.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {}", cfg.unit)
+                    };
+                    let val = format!("{}{tps:.prec$}{unit}", cfg.prefix);
+                    Some(format_kv(&cfg.label, &val, YELLOW, color))
+                }
+                None if cfg.hide_missing => None,
+                None => Some(format_kv(&cfg.label, "--", DIM, color)),
+            }
+        }
         "session_cost" => {
             let cfg = &config.modules.session_cost;
             if !cfg.enabled {
@@ -455,6 +475,7 @@ mod tests {
             cache_read_tokens: 20_857,
             cache_write_tokens: 4_096,
             output_tokens: 61_074,
+            session_estimated_tps: Some(42.3),
             cost_usd: Some(0.1428),
             subagent_cost_usd: Some(0.021),
             cost_is_local_estimate: false,
@@ -486,11 +507,11 @@ mod tests {
     fn renders_gemini_quota_gauges_to_the_right_of_model_and_effort() {
         let mut cfg = Config::default();
         cfg.format.color = false;
-        let out = render_status(&sample_metrics(), &sample_payload(), &cfg, Some(170));
-        let expected_content = "Mode: auto │ Ctx [████░░░░░░] 42.3% │ In 88.2k │ CacheR 20.9k │ CacheW 4.1k │ Out 61.1k │ Cost $0.1428 │ Gemini 4 Hydrogen (High) │ 5h [██████] 93.3% │ Wk [██████] 92.2%";
+        let out = render_status(&sample_metrics(), &sample_payload(), &cfg, Some(190));
+        let expected_content = "Mode: auto │ Ctx [████░░░░░░] 42.3% │ In 88.2k │ CacheR 20.9k │ CacheW 4.1k │ Out 61.1k │ TPS ~42.3 t/s │ Cost $0.1428 │ Gemini 4 Hydrogen (High) │ 5h [██████] 93.3% │ Wk [██████] 92.2%";
         assert!(out.starts_with(" "));
         assert!(out.ends_with(expected_content));
-        assert_eq!(visible_width(&out), 170);
+        assert_eq!(visible_width(&out), 190);
     }
 
     #[test]
@@ -539,8 +560,8 @@ mod tests {
     fn visible_width_ignores_ansi_escapes() {
         let mut cfg = Config::default();
         cfg.format.color = true;
-        let out = render_status(&sample_metrics(), &sample_payload(), &cfg, Some(180));
-        assert_eq!(visible_width(&out), 180);
+        let out = render_status(&sample_metrics(), &sample_payload(), &cfg, Some(200));
+        assert_eq!(visible_width(&out), 200);
     }
 
     #[test]
@@ -599,5 +620,25 @@ enabled = false
             out,
             "Ctx [░░░░░░░░░░] --% │ In 0 │ CacheR 0 │ CacheW 0 │ Out 0"
         );
+    }
+
+    #[test]
+    fn renders_placeholder_for_missing_tps_when_hide_missing_is_false() {
+        let mut cfg = Config::default();
+        cfg.format.color = false;
+        cfg.general.align = Alignment::Left;
+        cfg.general.order = vec![
+            "session_estimated_tps".to_string(),
+            "session_cost".to_string(),
+        ];
+        cfg.modules.session_estimated_tps.hide_missing = false;
+
+        let out = render_status(
+            &SessionMetrics::default(),
+            &StatusPayload::default(),
+            &cfg,
+            None,
+        );
+        assert_eq!(out, "TPS -- │ Cost N/A");
     }
 }
