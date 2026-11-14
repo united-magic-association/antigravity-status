@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +17,7 @@ pub struct SessionMetrics {
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub output_tokens: u64,
+    pub session_estimated_tps: Option<f64>,
     pub cost_usd: Option<f64>,
     pub subagent_cost_usd: Option<f64>,
     pub cost_is_local_estimate: bool,
@@ -31,6 +33,23 @@ struct SessionCacheState {
     sum_output: u64,
     sum_cache_read: u64,
     sum_cache_write: u64,
+    working_started_at_ms: Option<u64>,
+    tps_output_tokens: u64,
+    tps_elapsed_ms: u64,
+}
+
+impl SessionCacheState {
+    fn session_estimated_tps(&self) -> Option<f64> {
+        if self.tps_output_tokens == 0 || self.tps_elapsed_ms == 0 {
+            return None;
+        }
+        let tps = (self.tps_output_tokens as f64) / (self.tps_elapsed_ms as f64 / 1000.0);
+        if tps.is_finite() && tps > 0.0 {
+            Some(tps)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +104,15 @@ pub fn resolve_metrics(
     cache_dir: Option<&Path>,
     fallback_rates: Option<&TokenRates>,
 ) -> SessionMetrics {
+    resolve_metrics_at(payload, cache_dir, fallback_rates, current_time_ms())
+}
+
+fn resolve_metrics_at(
+    payload: &StatusPayload,
+    cache_dir: Option<&Path>,
+    fallback_rates: Option<&TokenRates>,
+    now_ms: u64,
+) -> SessionMetrics {
     let cw = payload.context_window.as_ref();
     let cw_total_input = cw.map_or(0, |c| c.total_input_tokens);
     let cw_total_output = cw.map_or(0, |c| c.total_output_tokens);
@@ -95,7 +123,9 @@ pub fn resolve_metrics(
         cw_total_input,
         cw_total_output,
         current_usage,
+        payload.agent_state.as_deref(),
         cache_dir,
+        now_ms,
     );
 
     let transcript = payload
@@ -157,10 +187,17 @@ pub fn resolve_metrics(
         cache_read_tokens,
         cache_write_tokens,
         output_tokens,
+        session_estimated_tps: tracked.session_estimated_tps(),
         cost_usd,
         subagent_cost_usd,
         cost_is_local_estimate,
     }
+}
+
+fn current_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
 fn estimate_usd(
@@ -249,7 +286,9 @@ fn update_session_cache(
     total_input: u64,
     total_output: u64,
     current_usage: Option<CurrentUsage>,
+    agent_state: Option<&str>,
     cache_dir: Option<&Path>,
+    now_ms: u64,
 ) -> SessionCacheState {
     let fallback = match current_usage {
         Some(u) => SessionCacheState {
@@ -272,10 +311,16 @@ fn update_session_cache(
         .and_then(|raw| serde_json::from_str::<SessionCacheState>(&raw).ok())
         .unwrap_or_default();
 
+    let mut dirty = false;
+
     // Reset accumulated totals if counters moved backwards (e.g., rewound/new session with same ID).
     if total_output < state.last_total_output {
         state = SessionCacheState::default();
+        dirty = true;
     }
+
+    let prev_total_output = state.last_total_output;
+    let mut output_delta = total_output.saturating_sub(prev_total_output);
 
     if let Some(curr) = current_usage {
         let snap = UsageSnapshot::from(curr);
@@ -284,6 +329,9 @@ fn update_session_cache(
         let usage_changed = state.last_usage.as_ref() != Some(&snap);
 
         if state.last_usage.is_none() || totals_advanced || usage_changed {
+            if output_delta == 0 && usage_changed {
+                output_delta = curr.output_tokens;
+            }
             state.sum_input = state.sum_input.saturating_add(curr.input_tokens);
             state.sum_output = state.sum_output.saturating_add(curr.output_tokens);
             state.sum_cache_read = state
@@ -295,13 +343,39 @@ fn update_session_cache(
             state.last_total_input = total_input;
             state.last_total_output = total_output;
             state.last_usage = Some(snap);
-
-            if fs::create_dir_all(dir).is_ok()
-                && let Ok(serialized) = serde_json::to_string(&state)
-            {
-                let _ = fs::write(&state_path, serialized);
-            }
+            dirty = true;
         }
+    } else if total_output > state.last_total_output {
+        state.last_total_output = total_output;
+        dirty = true;
+    }
+
+    let is_working = agent_state.is_some_and(|s| s.eq_ignore_ascii_case("working"));
+    if output_delta > 0
+        && let Some(start_ms) = state.working_started_at_ms
+    {
+        let elapsed_ms = now_ms.saturating_sub(start_ms);
+        if elapsed_ms > 0 {
+            state.tps_output_tokens = state.tps_output_tokens.saturating_add(output_delta);
+            state.tps_elapsed_ms = state.tps_elapsed_ms.saturating_add(elapsed_ms);
+        }
+        state.working_started_at_ms = if is_working { Some(now_ms) } else { None };
+        dirty = true;
+    } else if is_working {
+        if state.working_started_at_ms.is_none() {
+            state.working_started_at_ms = Some(now_ms);
+            dirty = true;
+        }
+    } else if state.working_started_at_ms.is_some() {
+        state.working_started_at_ms = None;
+        dirty = true;
+    }
+
+    if dirty
+        && fs::create_dir_all(dir).is_ok()
+        && let Ok(serialized) = serde_json::to_string(&state)
+    {
+        let _ = fs::write(&state_path, serialized);
     }
 
     state
@@ -436,6 +510,143 @@ mod tests {
         assert!(m.cost_is_local_estimate);
         let expected = (11946.0 * 2.0 + 7599.0 * 0.2 + 56.0 * 12.0) / 1_000_000.0;
         assert!((m.cost_usd.unwrap() - expected).abs() < 1e-9);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn estimates_session_tps_across_multiple_turns() {
+        let dir = temp_test_dir("tps");
+
+        // Initial idle tick on an existing session must not fabricate TPS.
+        let idle_initial: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-tps",
+              "agent_state": "idle",
+              "context_window": {
+                "total_input_tokens": 1000,
+                "total_output_tokens": 500,
+                "current_usage": { "input_tokens": 1000, "output_tokens": 100 }
+              }
+            }"#,
+        )
+        .unwrap();
+        let m0 = resolve_metrics_at(&idle_initial, Some(&dir), None, 10_000);
+        assert_eq!(m0.session_estimated_tps, None);
+
+        // Entering working starts the local turn timer; repeated working ticks keep t0.
+        let working: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-tps",
+              "agent_state": "working",
+              "context_window": {
+                "total_input_tokens": 1000,
+                "total_output_tokens": 500,
+                "current_usage": { "input_tokens": 1000, "output_tokens": 100 }
+              }
+            }"#,
+        )
+        .unwrap();
+        let m1 = resolve_metrics_at(&working, Some(&dir), None, 11_000);
+        assert_eq!(m1.session_estimated_tps, None);
+        let m2 = resolve_metrics_at(&working, Some(&dir), None, 12_500);
+        assert_eq!(m2.session_estimated_tps, None);
+
+        // Turn 1: +150 output tokens over 2.5s => 60.0 t/s.
+        let tool_use: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-tps",
+              "agent_state": "tool_use",
+              "context_window": {
+                "total_input_tokens": 1200,
+                "total_output_tokens": 650,
+                "current_usage": { "input_tokens": 200, "output_tokens": 150 }
+              }
+            }"#,
+        )
+        .unwrap();
+        let m3 = resolve_metrics_at(&tool_use, Some(&dir), None, 13_500);
+        assert!((m3.session_estimated_tps.unwrap() - 60.0).abs() < 1e-9);
+
+        // Subsequent idle ticks retain the session TPS until the next turn completes.
+        let idle_after: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-tps",
+              "agent_state": "idle",
+              "context_window": {
+                "total_input_tokens": 1200,
+                "total_output_tokens": 650,
+                "current_usage": { "input_tokens": 200, "output_tokens": 150 }
+              }
+            }"#,
+        )
+        .unwrap();
+        let m4 = resolve_metrics_at(&idle_after, Some(&dir), None, 15_000);
+        assert!((m4.session_estimated_tps.unwrap() - 60.0).abs() < 1e-9);
+
+        // Turn 2: +350 output tokens over 2.5s => cumulative (150 + 350) / (2.5 + 2.5) = 100.0 t/s.
+        let working_2: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-tps",
+              "agent_state": "working",
+              "context_window": {
+                "total_input_tokens": 1200,
+                "total_output_tokens": 650,
+                "current_usage": { "input_tokens": 200, "output_tokens": 150 }
+              }
+            }"#,
+        )
+        .unwrap();
+        let _ = resolve_metrics_at(&working_2, Some(&dir), None, 20_000);
+
+        let idle_2: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-tps",
+              "agent_state": "idle",
+              "context_window": {
+                "total_input_tokens": 1500,
+                "total_output_tokens": 1000,
+                "current_usage": { "input_tokens": 300, "output_tokens": 350 }
+              }
+            }"#,
+        )
+        .unwrap();
+        let m5 = resolve_metrics_at(&idle_2, Some(&dir), None, 22_500);
+        assert!((m5.session_estimated_tps.unwrap() - 100.0).abs() < 1e-9);
+
+        // Aborted working turn (working -> idle with no output gain) preserves prior session TPS
+        // and clears the stale timer so the next real turn starts from its own working timestamp.
+        let working_3: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-tps",
+              "agent_state": "working",
+              "context_window": {
+                "total_input_tokens": 1500,
+                "total_output_tokens": 1000,
+                "current_usage": { "input_tokens": 300, "output_tokens": 350 }
+              }
+            }"#,
+        )
+        .unwrap();
+        let _ = resolve_metrics_at(&working_3, Some(&dir), None, 30_000);
+        let m_aborted = resolve_metrics_at(&idle_2, Some(&dir), None, 35_000);
+        assert!((m_aborted.session_estimated_tps.unwrap() - 100.0).abs() < 1e-9);
+
+        // Counter rewind resets accumulated TPS state.
+        let rewound: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-tps",
+              "agent_state": "idle",
+              "context_window": {
+                "total_input_tokens": 100,
+                "total_output_tokens": 50,
+                "current_usage": { "input_tokens": 100, "output_tokens": 50 }
+              }
+            }"#,
+        )
+        .unwrap();
+        let m_rewound = resolve_metrics_at(&rewound, Some(&dir), None, 40_000);
+        assert_eq!(m_rewound.session_estimated_tps, None);
 
         let _ = fs::remove_dir_all(&dir);
     }

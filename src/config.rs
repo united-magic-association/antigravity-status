@@ -47,6 +47,7 @@ impl Default for GeneralConfig {
                 "session_cache_read_tokens".to_string(),
                 "session_cache_write_tokens".to_string(),
                 "session_output_tokens".to_string(),
+                "session_estimated_tps".to_string(),
                 "session_cost".to_string(),
                 "model_and_effort".to_string(),
                 "quota_5h_gauge".to_string(),
@@ -141,6 +142,7 @@ pub struct ModulesConfig {
     pub session_cache_read_tokens: TokenModuleConfig<CacheReadDefault>,
     pub session_cache_write_tokens: TokenModuleConfig<CacheWriteDefault>,
     pub session_output_tokens: TokenModuleConfig<OutputDefault>,
+    pub session_estimated_tps: TpsModuleConfig,
     pub session_cost: CostModuleConfig,
     pub model_and_effort: ModelAndEffortConfig,
     pub mode: ModeModuleConfig,
@@ -276,6 +278,30 @@ impl<L: DefaultLabel> Default for QuotaGaugeConfig<L> {
             empty_char: "░".to_string(),
             hide_missing: true,
             _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TpsModuleConfig {
+    pub enabled: bool,
+    pub label: String,
+    pub prefix: String,
+    pub unit: String,
+    pub decimals: usize,
+    pub hide_missing: bool,
+}
+
+impl Default for TpsModuleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            label: "TPS".to_string(),
+            prefix: "~".to_string(),
+            unit: "t/s".to_string(),
+            decimals: 1,
+            hide_missing: true,
         }
     }
 }
@@ -482,6 +508,7 @@ mod tests {
         let cfg = parse_config_str(raw).expect("config.example.toml should parse");
         assert!(cfg.storage.enabled);
         assert!(cfg.modules.context_gauge.enabled);
+        assert!(cfg.modules.session_estimated_tps.enabled);
         assert!(cfg.modules.session_cost.enabled);
         assert!(cfg.modules.session_cost.estimate_when_missing);
         assert!(cfg.modules.model_and_effort.enabled);
@@ -492,7 +519,7 @@ mod tests {
         assert_eq!(cfg.modules.mode.label, "Mode:");
         assert_eq!(cfg.general.align, Alignment::Right);
         assert_eq!(cfg.general.order.first().map(String::as_str), Some("mode"));
-        assert_eq!(cfg.general.order.len(), 10);
+        assert_eq!(cfg.general.order.len(), 11);
     }
 
     #[test]
@@ -516,6 +543,8 @@ enabled = false
         assert!(cfg.modules.session_cache_read_tokens.enabled);
         assert!(!cfg.modules.session_cache_write_tokens.enabled);
         assert!(cfg.modules.session_output_tokens.enabled);
+        assert!(cfg.modules.session_estimated_tps.enabled);
+        assert_eq!(cfg.modules.session_estimated_tps.label, "TPS");
         assert!(!cfg.modules.session_cost.enabled);
         assert!(cfg.modules.model_and_effort.enabled);
         assert!(!cfg.modules.model_and_effort.include_effort);

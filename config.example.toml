@@ -18,6 +18,7 @@ order = [
   "session_cache_read_tokens",
   "session_cache_write_tokens",
   "session_output_tokens",
+  "session_estimated_tps",
   "session_cost",
   "model_and_effort",
   "quota_5h_gauge",
@@ -25,7 +26,7 @@ order = [
 ]
 # Optional multi-line layout. If non-empty, overrides `general.order`.
 # lines = [
-#   ["mode", "context_gauge", "session_cost", "model_and_effort"],
+#   ["mode", "context_gauge", "session_estimated_tps", "session_cost", "model_and_effort"],
 #   ["session_input_tokens", "session_cache_read_tokens", "session_cache_write_tokens", "session_output_tokens", "quota_5h_gauge", "quota_weekly_gauge"],
 # ]
 hide_zero_cache_write = false
@@ -65,6 +66,14 @@ label = "CacheW"
 [modules.session_output_tokens]
 enabled = true
 label = "Out"
+
+[modules.session_estimated_tps]
+enabled = true
+label = "TPS"
+prefix = "~"
+unit = "t/s"
+decimals = 1
+hide_missing = true
 
 [modules.session_cost]
 enabled = true
