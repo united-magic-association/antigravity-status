@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>antigravity-status · Telemetry &amp; Benchmark Dashboard</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0f17'/%3E%3Cpath d='M7 22L13 14L18 18L25 9' fill='none' stroke='%235b9dff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>antigravity-status</h1>
+        <span class="subtitle">Anonymous Community Benchmark &amp; Local Stats Viewer</span>
+      </div>
+      <div class="controls">
+        <div class="window-pills" role="group" aria-label="Window selector">
+          <button class="pill active" data-window="24h">24h</button>
+          <button class="pill" data-window="7d">7d</button>
+          <button class="pill" data-window="30d">30d</button>
+        </div>
+        <label class="file-btn">
+          Import Stats JSON
+          <input type="file" id="file-input" accept="application/json,.json" />
+        </label>
+        <button type="button" class="clear-btn" id="clear-local-btn" hidden>Clear Local</button>
+        <label class="compare-toggle" id="compare-wrap" hidden>
+          <input type="checkbox" id="compare-toggle" checked />
+          <span>Compare vs Community</span>
+        </label>
+      </div>
+    </header>
+
+    <main id="drop-zone" class="container">
+      <div id="status-banner" class="banner" hidden></div>
+
+      <section class="kpis" id="kpi-grid"></section>
+
+      <section class="card table-card">
+        <div class="card-head">
+          <h2>By-Model Performance &amp; Cache Scorecard</h2>
+        </div>
+        <div class="table-scroll">
+          <table id="usage-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Effort</th>
+                <th>Plan Tier</th>
+                <th class="num">Events / Turns</th>
+                <th class="num">Input</th>
+                <th class="num">Cache Read</th>
+                <th class="num">Output</th>
+                <th class="num">Cache Hit</th>
+                <th class="num" id="th-tps-percentiles">TPS (p50 / p90 / p95)</th>
+                <th class="num">Mean TPS</th>
+                <th class="num">Ref Cost</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="charts-grid">
+        <article class="card">
+          <div class="card-head">
+            <div>
+              <h2>Hourly Output TPS Trend by Model</h2>
+              <span class="muted" id="sub-tps-trend">Per-model throughput across finalized hours (latest 24h / 48h)</span>
+            </div>
+            <select id="trend-pct-select" aria-label="Select percentile for hourly TPS trend"></select>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-tps-trend"></canvas></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>TPS by Model &amp; Effort</h2>
+            <span class="muted" id="sub-tps-model">Estimated p50, p90, p95 output tokens/s</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-tps-model"></canvas></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>TPS Distribution Histogram</h2>
+            <select id="hist-model-select" aria-label="Select model for histogram"></select>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-tps-hist"></canvas></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Quota Equivalence by Model &amp; Bucket</h2>
+            <span class="muted" id="sub-quota-model">Estimated p50, p90, p95 Reference USD per 1% Quota</span>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-quota"></canvas></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h2>Quota $/1% Distribution Histogram</h2>
+            <select id="quota-hist-select" aria-label="Select quota model for histogram"></select>
+          </div>
+          <div class="chart-wrap"><canvas id="chart-quota-hist"></canvas></div>
+        </article>
+      </section>
+
+      <section class="card table-card">
+        <div class="card-head">
+          <h2>By-Model Quota Equivalence Details</h2>
+        </div>
+        <div class="table-scroll">
+          <table id="quota-table">
+            <thead>
+              <tr>
+                <th>Plan Tier</th>
+                <th>Bucket</th>
+                <th>Attributed Model</th>
+                <th>Effort</th>
+                <th class="num">Slices</th>
+                <th class="num">Quota Drop</th>
+                <th class="num" id="th-quota-percentiles">$/1% (p50 / p90 / p95)</th>
+                <th class="num">$/1% Mean</th>
+                <th class="num">Out Tok / 1%</th>
+                <th class="num">Total Tok / 1%</th>
+                <th class="num">Ref Cost</th>
+                <th class="num" id="th-quota-rel-weight">Rel Weight (p50)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Schema v1 · Drop a local <code>antigravity-status stats --json</code> file anywhere above to inspect or compare against community data.</span>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

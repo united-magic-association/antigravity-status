@@ -38,9 +38,19 @@ cost_precision = 4
 color = true
 
 [storage]
-enabled = true
+# SQLite stores required cross-tick session state (TPS, token totals), usage history, and telemetry state.
 # Optional SQLite path (defaults to $XDG_DATA_HOME/antigravity-status/default.db or ~/.local/share/antigravity-status/default.db)
 # db_path = "~/.local/share/antigravity-status/default.db"
+
+[telemetry]
+# Opt-in anonymous hourly aggregate upload (strictly disabled by default).
+# Inspect payloads anytime with: `antigravity-status telemetry preview`
+enabled = false
+# Community Worker base URL (or full `/api/telemetry/ingest` URL; replace if self-hosting).
+endpoint = "https://antigravity-status-telemetry.umahq.workers.dev"
+auto_upload = true
+# Cooldown in seconds before retrying failed background uploads (uploads closed whole UTC hours at most once/hour)
+upload_interval_secs = 300
 
 [modules.context_gauge]
 enabled = true

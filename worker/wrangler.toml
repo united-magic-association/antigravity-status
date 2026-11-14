@@ -1,0 +1,20 @@
+name = "antigravity-status-telemetry"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "antigravity-status-telemetry"
+database_id = "d169f4de-6851-4e63-892d-590bb1b19abb"
+migrations_dir = "migrations"
+
+[[ratelimits]]
+name = "INGEST_RATE_LIMITER"
+namespace_id = "1001"
+
+[ratelimits.simple]
+limit = 10
+period = 60
+
+[triggers]
+crons = ["10 * * * *"]

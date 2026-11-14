@@ -1,4 +1,4 @@
-use crate::config::{Alignment, Config, DefaultLabel, QuotaGaugeConfig};
+use crate::config::{Alignment, Config, QuotaGaugeConfig};
 use crate::payload::{QuotaWindowKind, StatusPayload};
 use crate::tracker::SessionMetrics;
 
@@ -193,7 +193,7 @@ fn render_module(
 
             let display = match effort {
                 Some(eff) if cfg.include_effort => ensure_effort_suffix(raw_name, eff),
-                Some(eff) => strip_trailing_effort(raw_name, eff).to_string(),
+                Some(eff) => crate::payload::strip_trailing_effort(raw_name, eff).to_string(),
                 None => raw_name.to_string(),
             };
 
@@ -237,9 +237,9 @@ fn render_module(
     }
 }
 
-fn render_quota_gauge<L: DefaultLabel>(
+fn render_quota_gauge(
     remaining_fraction: Option<f64>,
-    cfg: &QuotaGaugeConfig<L>,
+    cfg: &QuotaGaugeConfig,
     color: bool,
 ) -> Option<String> {
     let width = cfg.width.max(1);
@@ -254,7 +254,7 @@ fn render_quota_gauge<L: DefaultLabel>(
         &cfg.empty_char
     };
 
-    let (bar, pct_text, tone) = match remaining_fraction {
+    let (bar, pct_text, tone) = match remaining_fraction.filter(|v| v.is_finite()) {
         Some(frac) => {
             let pct = (frac * 100.0).clamp(0.0, 100.0);
             let filled = ((pct / 100.0) * width as f64).round() as usize;
@@ -288,28 +288,10 @@ fn render_quota_gauge<L: DefaultLabel>(
     ))
 }
 
-fn strip_trailing_effort<'a>(name: &'a str, effort: &str) -> &'a str {
-    let trimmed = name.trim_end();
-    if let Some(without_paren) = trimmed.strip_suffix(')')
-        && let Some(open_idx) = without_paren.rfind('(')
-    {
-        let inner = without_paren[open_idx + 1..].trim();
-        if inner.eq_ignore_ascii_case(effort.trim()) {
-            return without_paren[..open_idx].trim_end();
-        }
-    }
-    name
-}
-
 fn ensure_effort_suffix(name: &str, effort: &str) -> String {
     let trimmed = name.trim_end();
-    if let Some(without_paren) = trimmed.strip_suffix(')')
-        && let Some(open_idx) = without_paren.rfind('(')
-    {
-        let inner = without_paren[open_idx + 1..].trim();
-        if inner.eq_ignore_ascii_case(effort.trim()) {
-            return trimmed.to_string();
-        }
+    if crate::payload::strip_trailing_effort(trimmed, effort).len() < trimmed.len() {
+        return trimmed.to_string();
     }
     format!("{trimmed} ({})", title_case_effort(effort.trim()))
 }
@@ -342,7 +324,7 @@ fn render_context_gauge(
         &cfg.empty_char
     };
 
-    let (bar, pct_text, tone) = match metrics.used_percentage {
+    let (bar, pct_text, tone) = match metrics.used_percentage.filter(|v| v.is_finite()) {
         Some(pct) => {
             let clamped = pct.clamp(0.0, 100.0);
             let filled = ((clamped / 100.0) * width as f64).round() as usize;
@@ -476,6 +458,7 @@ mod tests {
             cache_write_tokens: 4_096,
             output_tokens: 61_074,
             session_estimated_tps: Some(42.3),
+            last_turn_tps_sample: None,
             cost_usd: Some(0.1428),
             subagent_cost_usd: Some(0.021),
             cost_is_local_estimate: false,
@@ -640,5 +623,38 @@ enabled = false
             None,
         );
         assert_eq!(out, "TPS -- │ Cost N/A");
+    }
+
+    #[test]
+    fn renders_placeholder_for_non_finite_context_and_quota() {
+        let mut cfg = Config::default();
+        cfg.format.color = false;
+        cfg.general.align = Alignment::Left;
+        cfg.general.order = vec!["context_gauge".to_string(), "quota_5h_gauge".to_string()];
+
+        let metrics = SessionMetrics {
+            used_percentage: Some(f64::NAN),
+            ..Default::default()
+        };
+        let mut payload = StatusPayload::default();
+        payload.quota.insert(
+            "gemini-5h".to_string(),
+            crate::payload::QuotaBucket {
+                remaining_fraction: Some(f64::INFINITY),
+                ..Default::default()
+            },
+        );
+        payload.model = Some(crate::payload::ModelInfo {
+            id: Some("gemini-3".to_string()),
+            display_name: None,
+            effort: None,
+        });
+
+        let out_hidden = render_status(&metrics, &payload, &cfg, None);
+        assert_eq!(out_hidden, "Ctx [░░░░░░░░░░] --%");
+
+        cfg.modules.quota_5h_gauge.hide_missing = false;
+        let out_shown = render_status(&metrics, &payload, &cfg, None);
+        assert_eq!(out_shown, "Ctx [░░░░░░░░░░] --% │ 5h [░░░░░░] --%");
     }
 }

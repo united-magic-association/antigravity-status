@@ -59,9 +59,58 @@ impl StatusPayload {
     pub fn effective_model_name(&self) -> Option<&str> {
         self.model.as_ref().and_then(|m| {
             m.id.as_deref()
+                .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .or_else(|| m.display_name.as_deref().filter(|s| !s.is_empty()))
+                .or_else(|| {
+                    m.display_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                })
         })
+    }
+
+    /// Returns normalized `(model, effort)` with any trailing `(Effort)` suffix stripped
+    /// from `model` and `effort` lowercased (falling back to `"default"` when absent).
+    pub fn normalized_model_and_effort(&self) -> (String, String) {
+        let Some(raw_name) = self.effective_model_name() else {
+            return ("unknown".to_string(), "default".to_string());
+        };
+        let explicit_effort = self
+            .model
+            .as_ref()
+            .and_then(|m| m.effort.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        if let Some(eff) = explicit_effort {
+            let base = strip_trailing_effort(raw_name, eff).trim();
+            let base = if base.is_empty() { "unknown" } else { base };
+            return (base.to_string(), eff.to_ascii_lowercase());
+        }
+
+        if let Some((base, inferred_eff)) = split_known_trailing_effort(raw_name) {
+            let base = base.trim();
+            let base = if base.is_empty() { "unknown" } else { base };
+            return (base.to_string(), inferred_eff.to_ascii_lowercase());
+        }
+
+        let trimmed = raw_name.trim();
+        let base = if trimmed.is_empty() {
+            "unknown"
+        } else {
+            trimmed
+        };
+        (base.to_string(), "default".to_string())
+    }
+
+    /// Returns normalized subscription plan tier (`"unknown"` when omitted).
+    pub fn normalized_plan_tier(&self) -> &str {
+        self.plan_tier
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("unknown")
     }
 
     /// Selects `gemini` or `3p` quota bucket family based on the active model.
@@ -152,11 +201,129 @@ pub enum EstimatedField {
 }
 
 impl CostInfo {
-    /// Returns the estimated total session spend in USD when available.
+    /// Returns the estimated total session spend in USD when available and valid.
     pub fn effective_total_usd(&self) -> Option<f64> {
-        self.total_usd.or(match self.estimated {
-            Some(EstimatedField::Amount(v)) => Some(v),
-            _ => None,
-        })
+        self.total_usd
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .or(match self.estimated {
+                Some(EstimatedField::Amount(v)) if v.is_finite() && v >= 0.0 => Some(v),
+                _ => None,
+            })
+    }
+}
+
+/// Normalizes a telemetry/storage label by trimming whitespace, bounding to `max_utf16` UTF-16
+/// code units, and substituting `fallback` when the result is empty.
+pub fn normalize_label(raw: &str, fallback: &str, max_utf16: usize) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return fallback.to_string();
+    }
+    let mut utf16_len = 0usize;
+    let mut end_byte = trimmed.len();
+    for (idx, ch) in trimmed.char_indices() {
+        let ch_len = ch.len_utf16();
+        if utf16_len + ch_len > max_utf16 {
+            end_byte = idx;
+            break;
+        }
+        utf16_len += ch_len;
+    }
+    let truncated = trimmed[..end_byte].trim();
+    if truncated.is_empty() {
+        fallback.to_string()
+    } else {
+        truncated.to_string()
+    }
+}
+
+/// Strips a matching trailing `(effort)` suffix from a model name when present.
+pub fn strip_trailing_effort<'a>(name: &'a str, effort: &str) -> &'a str {
+    let trimmed = name.trim_end();
+    if let Some(without_paren) = trimmed.strip_suffix(')')
+        && let Some(open_idx) = without_paren.rfind('(')
+    {
+        let inner = without_paren[open_idx + 1..].trim();
+        if inner.eq_ignore_ascii_case(effort.trim()) {
+            return without_paren[..open_idx].trim_end();
+        }
+    }
+    name
+}
+
+/// Splits trailing `(Low|Medium|High|XHigh|Minimal|Max|None)` when `model.effort` is omitted.
+pub fn split_known_trailing_effort(name: &str) -> Option<(&str, &str)> {
+    let trimmed = name.trim_end();
+    let without_paren = trimmed.strip_suffix(')')?;
+    let open_idx = without_paren.rfind('(')?;
+    let inner = without_paren[open_idx + 1..].trim();
+    if is_known_effort_tag(inner) {
+        Some((without_paren[..open_idx].trim_end(), inner))
+    } else {
+        None
+    }
+}
+
+fn is_known_effort_tag(tag: &str) -> bool {
+    matches!(
+        tag.to_ascii_lowercase().as_str(),
+        "low" | "medium" | "high" | "xhigh" | "minimal" | "max" | "none"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_whitespace_and_bare_effort_models() {
+        let payload = StatusPayload {
+            model: Some(ModelInfo {
+                id: Some("  (High)  ".to_string()),
+                display_name: Some("Ignored".to_string()),
+                effort: None,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            payload.normalized_model_and_effort(),
+            ("unknown".to_string(), "high".to_string())
+        );
+
+        let ws = StatusPayload {
+            model: Some(ModelInfo {
+                id: Some("   ".to_string()),
+                display_name: Some("  Gemini 3  ".to_string()),
+                effort: None,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(ws.effective_model_name(), Some("Gemini 3"));
+        assert_eq!(
+            ws.normalized_model_and_effort(),
+            ("Gemini 3".to_string(), "default".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_label_respects_utf16_limit_and_cost_rejects_non_finite() {
+        let emoji = "😀".repeat(70); // 140 UTF-16 code units
+        let clamped = normalize_label(&emoji, "unknown", 128);
+        assert_eq!(clamped.encode_utf16().count(), 128);
+        assert_eq!(normalize_label("   ", "default", 128), "default");
+
+        let cost = CostInfo {
+            total_usd: Some(f64::NAN),
+            subagent_usd: None,
+            estimated: Some(EstimatedField::Amount(0.25)),
+        };
+        assert_eq!(cost.effective_total_usd(), Some(0.25));
+
+        let neg = CostInfo {
+            total_usd: Some(-1.0),
+            subagent_usd: None,
+            estimated: None,
+        };
+        assert_eq!(neg.effective_total_usd(), None);
     }
 }
