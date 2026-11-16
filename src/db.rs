@@ -689,33 +689,33 @@ fn persist_session_usage(
 
     let (d_in, d_cr, d_cw, d_out, d_cost, next_in, next_cr, next_cw, next_out, next_cost) =
         match prev {
-            Some(p) if cur_out < p.output_token => {
-                // Counter rewound (e.g., conversation restarted with same ID).
-                (
-                    cur_in,
-                    cur_cr,
-                    cur_cw,
-                    cur_out,
-                    reported_cost,
-                    cur_in,
-                    cur_cr,
-                    cur_cw,
-                    cur_out,
-                    reported_cost,
-                )
-            }
             Some(p) => {
+                // Keep all cumulative token watermarks strictly monotonic so `/rewind` checkpoints
+                // or transient counter drops never replay already-recorded session history.
                 let d_in = to_i64(to_u64(cur_in).saturating_sub(to_u64(p.input_token)));
                 let d_cr = to_i64(to_u64(cur_cr).saturating_sub(to_u64(p.cache_read_token)));
                 let d_cw = to_i64(to_u64(cur_cw).saturating_sub(to_u64(p.cache_write_token)));
                 let d_out = to_i64(to_u64(cur_out).saturating_sub(to_u64(p.output_token)));
-                let d_cost = reported_cost.map(|c| {
-                    (c - p
-                        .reported_cost_usd
-                        .filter(|v| v.is_finite() && *v >= 0.0)
-                        .unwrap_or(0.0))
-                    .max(0.0)
-                });
+                let rewound = cur_out < p.output_token
+                    || cur_in < p.input_token
+                    || cur_cr < p.cache_read_token
+                    || cur_cw < p.cache_write_token;
+                let d_cost = if rewound {
+                    None
+                } else {
+                    reported_cost.map(|c| {
+                        (c - p
+                            .reported_cost_usd
+                            .filter(|v| v.is_finite() && *v >= 0.0)
+                            .unwrap_or(0.0))
+                        .max(0.0)
+                    })
+                };
+                let next_cost = if rewound {
+                    reported_cost
+                } else {
+                    reported_cost.or(p.reported_cost_usd)
+                };
                 (
                     d_in,
                     d_cr,
@@ -725,8 +725,8 @@ fn persist_session_usage(
                     cur_in.max(p.input_token),
                     cur_cr.max(p.cache_read_token),
                     cur_cw.max(p.cache_write_token),
-                    cur_out,
-                    reported_cost.or(p.reported_cost_usd),
+                    cur_out.max(p.output_token),
+                    next_cost,
                 )
             }
             None => (
@@ -2192,6 +2192,85 @@ mod tests {
         );
         assert_eq!(stored_cost, None);
         assert_eq!(tps_count, 2);
+
+        cleanup_db(&db);
+    }
+
+    #[test]
+    fn counter_rewind_and_transient_drops_never_replay_existing_session_usage() {
+        let db = temp_db_path("rewind-no-replay");
+        let payload: StatusPayload = serde_json::from_str(
+            r#"{
+              "session_id": "sess-long-rewind",
+              "plan_tier": "Google AI Ultra",
+              "model": { "id": "Gemini 4 Hydrogen (XHigh)" }
+            }"#,
+        )
+        .unwrap();
+
+        // Accumulate multi-day session usage.
+        let m1 = SessionMetrics {
+            input_tokens: 38_175_426,
+            cache_read_tokens: 601_965_254,
+            output_tokens: 7_833_655,
+            cost_usd: Some(290.75),
+            ..Default::default()
+        };
+        record_snapshot_at(&db, &payload, &m1, "2026-11-16T08:16:24Z").unwrap();
+
+        // Rewind drops output_tokens (and/or transient fallback lowers input/cache_read)
+        // without recording duplicate usage_event rows or replaying cumulative totals.
+        let m_rewound = SessionMetrics {
+            input_tokens: 38_175_426,
+            cache_read_tokens: 601_965_254,
+            output_tokens: 7_587_361,
+            cost_usd: None,
+            ..Default::default()
+        };
+        record_snapshot_at(&db, &payload, &m_rewound, "2026-11-16T08:17:11Z").unwrap();
+
+        let m_transient_drop = SessionMetrics {
+            input_tokens: 2_775_520,
+            cache_read_tokens: 53_834_470,
+            output_tokens: 7_667_923,
+            cost_usd: None,
+            ..Default::default()
+        };
+        record_snapshot_at(&db, &payload, &m_transient_drop, "2026-11-16T08:17:16Z").unwrap();
+
+        // Subsequent normal turn resumes accumulating only the genuine new deltas.
+        let m_next = SessionMetrics {
+            input_tokens: 38_177_493,
+            cache_read_tokens: 602_418_077,
+            output_tokens: 7_674_230,
+            cost_usd: None,
+            ..Default::default()
+        };
+        record_snapshot_at(&db, &payload, &m_next, "2026-11-16T08:18:32Z").unwrap();
+
+        let conn = Connection::open(&db).unwrap();
+        let (event_count, sum_in, sum_cr, sum_out, stored_cost): (
+            i64,
+            i64,
+            i64,
+            i64,
+            Option<f64>,
+        ) = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM usage_event),
+                        (SELECT SUM(delta_input_token) FROM usage_event),
+                        (SELECT SUM(delta_cache_read_token) FROM usage_event),
+                        (SELECT SUM(delta_output_token) FROM usage_event),
+                        (SELECT reported_cost_usd FROM session WHERE session_id = 'sess-long-rewind')",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(event_count, 2);
+        assert_eq!(sum_in, 38_177_493);
+        assert_eq!(sum_cr, 602_418_077);
+        assert_eq!(sum_out, 7_833_655);
+        assert_eq!(stored_cost, None);
 
         cleanup_db(&db);
     }
